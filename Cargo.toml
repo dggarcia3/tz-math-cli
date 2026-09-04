@@ -1,0 +1,8 @@
+[package]
+name = "tzmath"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Validating parser and pretty printer for civil timestamps with UTC offsets"
+
+[dependencies]
