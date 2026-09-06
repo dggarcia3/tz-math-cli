@@ -301,3 +301,189 @@ pub fn parse_duration(s: &str) -> ParseResult<i64> {
     }
     Ok(sign * total)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_basic_timestamp() {
+        let dt = DateTime::parse("2024-03-10T14:30:00-05:00").unwrap();
+        assert_eq!(dt.year, 2024);
+        assert_eq!(dt.month, 3);
+        assert_eq!(dt.day, 10);
+        assert_eq!(dt.hour, 14);
+        assert_eq!(dt.minute, 30);
+        assert_eq!(dt.second, 0);
+        assert_eq!(dt.offset.minutes(), -5 * 60);
+    }
+
+    #[test]
+    fn accepts_space_in_place_of_t() {
+        let dt = DateTime::parse("2024-03-10 14:30:00Z").unwrap();
+        assert_eq!(dt.hour, 14);
+    }
+
+    #[test]
+    fn accepts_lowercase_t_and_z() {
+        let dt = DateTime::parse("2024-03-10t14:30:00z").unwrap();
+        assert_eq!(dt.offset, Offset::UTC);
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        let dt = DateTime::parse("  2024-03-10T14:30:00Z  ").unwrap();
+        assert_eq!(dt.day, 10);
+    }
+
+    #[test]
+    fn rejects_non_ascii() {
+        assert!(DateTime::parse("2024-03-10T14:30:00\u{2103}").is_err());
+    }
+
+    #[test]
+    fn rejects_too_short_input() {
+        assert!(DateTime::parse("2024-03-10T14:30").is_err());
+    }
+
+    #[test]
+    fn rejects_bad_date_separators() {
+        assert!(DateTime::parse("2024/03/10T14:30:00Z").is_err());
+    }
+
+    #[test]
+    fn rejects_bad_time_separators() {
+        assert!(DateTime::parse("2024-03-10T14-30-00Z").is_err());
+    }
+
+    #[test]
+    fn rejects_missing_t_or_space() {
+        assert!(DateTime::parse("2024-03-10X14:30:00Z").is_err());
+    }
+
+    #[test]
+    fn rejects_month_out_of_range() {
+        assert!(DateTime::parse("2024-00-10T14:30:00Z").is_err());
+        assert!(DateTime::parse("2024-13-10T14:30:00Z").is_err());
+    }
+
+    #[test]
+    fn rejects_hour_minute_second_out_of_range() {
+        assert!(DateTime::parse("2024-03-10T24:00:00Z").is_err());
+        assert!(DateTime::parse("2024-03-10T00:60:00Z").is_err());
+        assert!(DateTime::parse("2024-03-10T00:00:60Z").is_err());
+    }
+
+    #[test]
+    fn leap_year_feb_29_is_valid_on_divisible_by_4() {
+        assert!(DateTime::parse("2024-02-29T00:00:00Z").is_ok());
+    }
+
+    #[test]
+    fn feb_29_is_invalid_on_non_leap_year() {
+        assert!(DateTime::parse("2023-02-29T00:00:00Z").is_err());
+    }
+
+    #[test]
+    fn century_year_divisible_by_400_is_leap() {
+        assert!(DateTime::parse("2000-02-29T00:00:00Z").is_ok());
+    }
+
+    #[test]
+    fn century_year_not_divisible_by_400_is_not_leap() {
+        assert!(DateTime::parse("1900-02-29T00:00:00Z").is_err());
+    }
+
+    #[test]
+    fn rejects_day_zero_and_day_31_in_short_month() {
+        assert!(DateTime::parse("2024-04-00T00:00:00Z").is_err());
+        assert!(DateTime::parse("2024-04-31T00:00:00Z").is_err());
+    }
+
+    #[test]
+    fn parses_z_offset() {
+        assert_eq!(Offset::parse("Z").unwrap(), Offset::UTC);
+        assert_eq!(Offset::parse("z").unwrap(), Offset::UTC);
+    }
+
+    #[test]
+    fn parses_offset_extremes() {
+        assert_eq!(Offset::parse("-12:00").unwrap().minutes(), -12 * 60);
+        assert_eq!(Offset::parse("+14:00").unwrap().minutes(), 14 * 60);
+    }
+
+    #[test]
+    fn rejects_offset_beyond_real_world_range() {
+        assert!(Offset::parse("-12:01").is_err());
+        assert!(Offset::parse("+14:01").is_err());
+    }
+
+    #[test]
+    fn rejects_offset_minutes_out_of_range() {
+        assert!(Offset::parse("+05:60").is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_offset() {
+        assert!(Offset::parse("+5:00").is_err());
+        assert!(Offset::parse("0500").is_err());
+        assert!(Offset::parse("+05:00:00").is_err());
+    }
+
+    #[test]
+    fn offset_display_round_trips() {
+        assert_eq!(Offset::parse("+09:30").unwrap().to_string(), "+09:30");
+        assert_eq!(Offset::parse("-05:00").unwrap().to_string(), "-05:00");
+        assert_eq!(Offset::UTC.to_string(), "Z");
+    }
+
+    #[test]
+    fn with_offset_preserves_instant() {
+        let dt = DateTime::parse("2024-03-10T14:30:00-05:00").unwrap();
+        let converted = dt.with_offset(Offset::parse("+09:00").unwrap());
+        assert_eq!(dt.to_epoch_seconds(), converted.to_epoch_seconds());
+        assert_eq!(converted.to_string(), "2024-03-11T04:30:00+09:00");
+    }
+
+    #[test]
+    fn add_seconds_rolls_over_month_and_year() {
+        let dt = DateTime::parse("2023-12-31T23:30:00Z").unwrap();
+        let later = dt.add_seconds(3600);
+        assert_eq!(later.to_string(), "2024-01-01T00:30:00Z");
+    }
+
+    #[test]
+    fn add_seconds_rolls_over_leap_day() {
+        let dt = DateTime::parse("2024-02-28T23:00:00Z").unwrap();
+        let later = dt.add_seconds(3600 * 2);
+        assert_eq!(later.to_string(), "2024-02-29T01:00:00Z");
+    }
+
+    #[test]
+    fn epoch_round_trip_is_stable() {
+        let dt = DateTime::parse("1969-12-31T23:59:59Z").unwrap();
+        assert_eq!(dt.to_epoch_seconds(), -1);
+        let back = DateTime::from_epoch_seconds(-1, Offset::UTC);
+        assert_eq!(back, dt);
+    }
+
+    #[test]
+    fn parse_duration_handles_mixed_units() {
+        assert_eq!(parse_duration("1d2h3m4s").unwrap(), 86400 + 7200 + 180 + 4);
+    }
+
+    #[test]
+    fn parse_duration_handles_sign() {
+        assert_eq!(parse_duration("-90m").unwrap(), -5400);
+        assert_eq!(parse_duration("+90m").unwrap(), 5400);
+    }
+
+    #[test]
+    fn parse_duration_rejects_empty_and_malformed() {
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("-").is_err());
+        assert!(parse_duration("3x").is_err());
+        assert!(parse_duration("h3").is_err());
+        assert!(parse_duration("3h4").is_err());
+    }
+}
