@@ -96,6 +96,8 @@ pub struct DateTime {
     pub hour: u32,
     pub minute: u32,
     pub second: u32,
+    /// Fraction of the second, in nanoseconds (0..=999_999_999).
+    pub nanosecond: u32,
     pub offset: Offset,
 }
 
@@ -146,9 +148,11 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 
 impl DateTime {
     /// Parses `YYYY-MM-DDTHH:MM:SS` (a space instead of `T` is also
-    /// accepted) followed by `Z` or a `+HH:MM` / `-HH:MM` offset. Every
-    /// field is range-checked, including day-of-month against the actual
-    /// length of that month in that year.
+    /// accepted), an optional `.` followed by 1-9 fractional-second digits,
+    /// then `Z` or a `+HH:MM` / `-HH:MM` offset. Every field is
+    /// range-checked, including day-of-month against the actual length of
+    /// that month in that year. Fractional digits beyond nanosecond
+    /// precision are truncated rather than rejected.
     pub fn parse(s: &str) -> ParseResult<DateTime> {
         let s = s.trim();
         if !s.is_ascii() {
@@ -186,7 +190,27 @@ impl DateTime {
         let second: u32 = s[17..19]
             .parse()
             .map_err(|_| ParseError(format!("bad second in '{s}'")))?;
-        let offset = Offset::parse(&s[19..])?;
+        let mut idx = 19;
+        let mut nanosecond: u32 = 0;
+        if bytes.get(idx) == Some(&b'.') {
+            idx += 1;
+            let start = idx;
+            while bytes.get(idx).is_some_and(|b| b.is_ascii_digit()) {
+                idx += 1;
+            }
+            if idx == start {
+                return err(format!("expected digits after '.' in '{s}'"));
+            }
+            let frac = &s[start..idx.min(start + 9)];
+            let mut nanos: u32 = frac
+                .parse()
+                .map_err(|_| ParseError(format!("bad fractional seconds in '{s}'")))?;
+            for _ in frac.len()..9 {
+                nanos *= 10;
+            }
+            nanosecond = nanos;
+        }
+        let offset = Offset::parse(&s[idx..])?;
 
         if !(1..=12).contains(&month) {
             return err(format!("month {month} out of range 1..=12"));
@@ -205,7 +229,7 @@ impl DateTime {
             return err(format!("second {second} out of range 0..=59"));
         }
 
-        Ok(DateTime { year, month, day, hour, minute, second, offset })
+        Ok(DateTime { year, month, day, hour, minute, second, nanosecond, offset })
     }
 
     /// Seconds since the Unix epoch, i.e. the offset-independent instant.
@@ -219,7 +243,8 @@ impl DateTime {
     }
 
     /// Builds the wall-clock reading a clock set to `offset` would show at
-    /// the given instant.
+    /// the given instant. The nanosecond field is always zero; instants
+    /// only carry whole seconds.
     pub fn from_epoch_seconds(epoch: i64, offset: Offset) -> DateTime {
         let local = epoch + offset.minutes() as i64 * 60;
         let days = local.div_euclid(86400);
@@ -232,18 +257,23 @@ impl DateTime {
             hour: (secs_of_day / 3600) as u32,
             minute: (secs_of_day / 60 % 60) as u32,
             second: (secs_of_day % 60) as u32,
+            nanosecond: 0,
             offset,
         }
     }
 
     /// Re-expresses the same instant under a different offset.
     pub fn with_offset(&self, offset: Offset) -> DateTime {
-        DateTime::from_epoch_seconds(self.to_epoch_seconds(), offset)
+        DateTime { nanosecond: self.nanosecond, ..DateTime::from_epoch_seconds(self.to_epoch_seconds(), offset) }
     }
 
-    /// Adds a (possibly negative) number of seconds, keeping the offset.
+    /// Adds a (possibly negative) number of seconds, keeping the offset and
+    /// the fractional second unchanged.
     pub fn add_seconds(&self, delta: i64) -> DateTime {
-        DateTime::from_epoch_seconds(self.to_epoch_seconds() + delta, self.offset)
+        DateTime {
+            nanosecond: self.nanosecond,
+            ..DateTime::from_epoch_seconds(self.to_epoch_seconds() + delta, self.offset)
+        }
     }
 }
 
@@ -251,9 +281,17 @@ impl fmt::Display for DateTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}",
-            self.year, self.month, self.day, self.hour, self.minute, self.second, self.offset
-        )
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second
+        )?;
+        if self.nanosecond != 0 {
+            let mut frac = format!("{:09}", self.nanosecond);
+            while frac.ends_with('0') {
+                frac.pop();
+            }
+            write!(f, ".{frac}")?;
+        }
+        write!(f, "{}", self.offset)
     }
 }
 
@@ -465,6 +503,45 @@ mod tests {
         assert_eq!(dt.to_epoch_seconds(), -1);
         let back = DateTime::from_epoch_seconds(-1, Offset::UTC);
         assert_eq!(back, dt);
+    }
+
+    #[test]
+    fn parses_fractional_seconds() {
+        let dt = DateTime::parse("2024-03-10T14:30:00.5Z").unwrap();
+        assert_eq!(dt.nanosecond, 500_000_000);
+    }
+
+    #[test]
+    fn fractional_seconds_pad_and_truncate_to_nanoseconds() {
+        let dt = DateTime::parse("2024-03-10T14:30:00.123456789123Z").unwrap();
+        assert_eq!(dt.nanosecond, 123_456_789);
+    }
+
+    #[test]
+    fn fractional_seconds_round_trip_through_display() {
+        assert_eq!(
+            DateTime::parse("2024-03-10T14:30:00.250Z").unwrap().to_string(),
+            "2024-03-10T14:30:00.25Z"
+        );
+        assert_eq!(
+            DateTime::parse("2024-03-10T14:30:00Z").unwrap().to_string(),
+            "2024-03-10T14:30:00Z"
+        );
+    }
+
+    #[test]
+    fn rejects_dot_with_no_digits() {
+        assert!(DateTime::parse("2024-03-10T14:30:00.Z").is_err());
+    }
+
+    #[test]
+    fn fractional_seconds_survive_offset_conversion_and_addition() {
+        let dt = DateTime::parse("2024-03-10T14:30:00.750-05:00").unwrap();
+        let converted = dt.with_offset(Offset::parse("+09:00").unwrap());
+        assert_eq!(converted.nanosecond, 750_000_000);
+        let later = dt.add_seconds(60);
+        assert_eq!(later.nanosecond, 750_000_000);
+        assert_eq!(later.to_string(), "2024-03-10T14:31:00.75-05:00");
     }
 
     #[test]

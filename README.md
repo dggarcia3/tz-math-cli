@@ -7,8 +7,10 @@ they're about getting the basic offset math wrong: turning a wall-clock
 reading plus a UTC offset into an absolute instant, and back again under a
 different offset, without losing or gaining a day at a boundary. This is a
 small, dependency-free implementation of that core: a validating parser for
-`YYYY-MM-DDTHH:MM:SS±HH:MM` timestamps, a pretty printer that normalizes
-them back to a canonical form, and the conversion/arithmetic in between.
+`YYYY-MM-DDTHH:MM:SS[.fraction]±HH:MM` timestamps, a pretty printer that
+normalizes them back to a canonical form, and the conversion/arithmetic in
+between. Fractional seconds are optional, parsed to nanosecond precision,
+and printed with trailing zeros trimmed.
 
 There is no DST support and no named timezones ("America/New_York" is out
 of scope) - only fixed numeric offsets, which is what the wire format for
