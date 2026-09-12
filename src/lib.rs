@@ -340,6 +340,39 @@ pub fn parse_duration(s: &str) -> ParseResult<i64> {
     Ok(sign * total)
 }
 
+/// Formats a signed number of seconds as `d`/`h`/`m`/`s` components, e.g.
+/// `1d2h3m4s`, `-90m` -> `-1h30m`, `0` -> `0s`. Zero-valued components are
+/// omitted. This is the inverse of `parse_duration`: feeding the output
+/// back through `parse_duration` reproduces the original second count.
+pub fn format_duration(seconds: i64) -> String {
+    if seconds == 0 {
+        return "0s".to_string();
+    }
+    let sign = if seconds < 0 { "-" } else { "" };
+    let mut remaining = seconds.unsigned_abs();
+    let days = remaining / 86400;
+    remaining %= 86400;
+    let hours = remaining / 3600;
+    remaining %= 3600;
+    let minutes = remaining / 60;
+    let secs = remaining % 60;
+
+    let mut out = String::from(sign);
+    if days > 0 {
+        out += &format!("{days}d");
+    }
+    if hours > 0 {
+        out += &format!("{hours}h");
+    }
+    if minutes > 0 {
+        out += &format!("{minutes}m");
+    }
+    if secs > 0 {
+        out += &format!("{secs}s");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,5 +595,29 @@ mod tests {
         assert!(parse_duration("3x").is_err());
         assert!(parse_duration("h3").is_err());
         assert!(parse_duration("3h4").is_err());
+    }
+
+    #[test]
+    fn format_duration_handles_zero() {
+        assert_eq!(format_duration(0), "0s");
+    }
+
+    #[test]
+    fn format_duration_omits_zero_components() {
+        assert_eq!(format_duration(86400 + 4), "1d4s");
+        assert_eq!(format_duration(3600), "1h");
+    }
+
+    #[test]
+    fn format_duration_handles_sign() {
+        assert_eq!(format_duration(-5400), "-1h30m");
+        assert_eq!(format_duration(90 * 60), "1h30m");
+    }
+
+    #[test]
+    fn format_duration_round_trips_through_parse_duration() {
+        for secs in [0, 1, -1, 86400 + 7200 + 180 + 4, -5400, i64::from(i32::MAX)] {
+            assert_eq!(parse_duration(&format_duration(secs)).unwrap(), secs);
+        }
     }
 }

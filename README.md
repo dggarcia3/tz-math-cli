@@ -48,6 +48,12 @@ $ cargo run -- convert 2024-02-29T23:00:00Z -05:00
 
 $ cargo run -- convert 2024-02-30T00:00:00Z +00:00
 error: day 30 out of range for 2024-02
+
+$ cargo run -- diff 2024-03-10T14:30:00-05:00 2024-03-11T04:30:00+09:00
+0s
+
+$ cargo run -- diff 2023-12-31T23:30:00Z 2024-01-01T01:00:00Z
+1h30m
 ```
 
 Invalid input is rejected with a specific reason (bad separators, an

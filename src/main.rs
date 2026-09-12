@@ -29,6 +29,12 @@ fn run(args: &[String]) -> Result<String, String> {
             let delta = tzmath::parse_duration(duration).map_err(|e| e.to_string())?;
             Ok(dt.add_seconds(delta).to_string())
         }
+        [cmd, from, to] if cmd == "diff" => {
+            let from = tzmath::DateTime::parse(from).map_err(|e| e.to_string())?;
+            let to = tzmath::DateTime::parse(to).map_err(|e| e.to_string())?;
+            let elapsed = to.to_epoch_seconds() - from.to_epoch_seconds();
+            Ok(tzmath::format_duration(elapsed))
+        }
         [cmd, ..] => Err(format!("unknown command '{cmd}'")),
         [] => Err("no command given".to_string()),
     }
@@ -41,4 +47,6 @@ fn print_usage() {
     eprintln!("  tzmath add <timestamp> <duration>");
     eprintln!("      tzmath add 2024-03-10T14:30:00-05:00 3h30m");
     eprintln!("      tzmath add 2024-03-10T14:30:00-05:00 -90m");
+    eprintln!("  tzmath diff <from> <to>");
+    eprintln!("      tzmath diff 2024-03-10T14:30:00-05:00 2024-03-10T18:00:00-05:00");
 }
