@@ -59,6 +59,17 @@ $ cargo run -- diff 2023-12-31T23:30:00Z 2024-01-01T01:00:00Z
 Invalid input is rejected with a specific reason (bad separators, an
 out-of-range field, an offset outside -12:00..=+14:00), not a panic.
 
+`convert` and `add` also take `-` in place of the timestamp to read one
+timestamp per line from stdin, printing one converted line per input line:
+
+```
+$ printf '2024-03-10T14:30:00-05:00\n2024-06-01T00:00:00Z\n' | cargo run -- convert - +09:00
+2024-03-11T04:30:00+09:00
+2024-06-01T09:00:00+09:00
+```
+
+A bad line aborts the whole batch rather than printing partial output.
+
 ## How the conversion works
 
 Dates are converted to a day count via Howard Hinnant's `days_from_civil`
